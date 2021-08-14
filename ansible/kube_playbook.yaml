@@ -1,0 +1,101 @@
+---
+- hosts: krolik
+  remote_user: root
+  tasks:
+  - name: check kubectl installed
+    command: kubectl version --client=true
+    register: kubectl_krolik_exist
+    ignore_errors: True
+  - name: install Kubectl if it not exist
+    block:
+    - yum_repository:
+        name: Kubernetes
+        description: Kubernates YUM repo
+        baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+        enabled: yes
+        gpgcheck: yes
+        repo_gpgcheck: yes
+        gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+    - yum: name=kubectl state=latest
+    when: kubectl_krolik_exist.failed
+  - name: run this command and ignore the result
+    command: kubectl config current-context
+    ignore_errors: True
+    register: result
+  - name: check helm installed
+    command: helm version
+    register: helm_krolik_exist
+    ignore_errors: True
+  - name: install helm
+    block:
+    - file:
+        path: /tmp/helm/
+        state: directory
+        mode: 0777
+    - get_url: 
+        url: https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+        dest: /tmp/helm/get_helm.sh
+        mode: 0700
+    - command: /tmp/helm/get_helm.sh
+    always:
+    - file:
+        path: /tmp/helm/
+        state: absent
+    when: helm_krolik_exist.failed
+- hosts: notehost
+  remote_user: root
+  tasks:
+  - name: run this command and ignore the result
+    become: true
+    become_method: su
+    become_user: ankis
+    become_flags: '-'
+    command: kubectl config current-context
+    register: result_host
+  - name: check helm installed
+    command: helm version
+    register: helm_note_exist
+  - name: install helm
+    block:
+    - file:
+        path: /tmp/helm/
+        state: directory
+        mode: 0777
+    - get_url: 
+        url: https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+        dest: /tmp/helm/get_helm.sh
+        mode: 0700
+    - command: /tmp/helm/get_helm.sh
+    always:
+    - file:
+        path: /tmp/helm/
+        state: absent
+    when: helm_note_exist.failed
+  - name: check mytest-ngunx-pack helm package is already installed
+    command: helm list -f 'mytest-ngunx-pack'
+    become: true
+    become_method: su
+    become_user: ankis
+    become_flags: '-'
+    register: myhelm_packege_runned
+  - name: install my test helm package
+    block:
+    - copy:
+        src: /mnt/share/mytest-ngunx-pack-0.1.0.tgz
+        dest: /tmp/mytest-ngunx-pack-0.1.0.tgz
+    - command: helm install test-web-from-helm /tmp/mytest-ngunx-pack-0.1.0.tgz
+      become: true
+      become_method: su
+      become_user: ankis
+      become_flags: '-'
+    when: myhelm_packege_runned.stdout_lines | length < 2
+  - name: Check if plan was applied
+    uri:
+      url: "http://mytest.web/"
+      method: GET
+      validate_certs: no
+      status_code: [200]
+    register: web_result
+    until: web_result.failed == false
+    retries: 20
+    delay: 5
